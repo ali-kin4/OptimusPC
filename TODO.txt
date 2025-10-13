@@ -1,0 +1,18 @@
+we need to detect which windows version the os is because maybe couple of commands may not work properly 
+---
+
+the thing I want you to do is refactor and upgrade the gui to be beautiful, modern looking, pretty, fast and interactive, also use the best package for gui (I have pyqt in my mind but if you have better options go with them)
+
+---
+
+also do you see the Clean.bat file? thats my old command file that I was used to run to make my pc run faster, do you think our program with current condition is better than that or at least doing all those stuff as well?
+
+
+---
+
+For System Info part, lets make it live info instead of just refreshing, the app is gonna get live info
+
+---
+
+also what if we have a suitable location or tab maybe in the app, so it shows full PC Specs, like OS name and version
+exact GPU spec, RAM, DISK, and everything?
