@@ -26,6 +26,18 @@ class OptimusOptimizer:
             os.path.expanduser('~\\AppData\\Local\\Microsoft\\Windows\\WebCache'),
         ]
         
+        # Additional cleanup directories for Windows optimization
+        self.windows_cleanup_dirs = [
+            os.path.expandvars('%SystemRoot%\\Temp'),
+            os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download'),
+            os.path.expandvars('%SystemRoot%\\Logs'),
+            os.path.expanduser('~\\AppData\\Local\\Microsoft\\Windows\\Explorer'),
+            os.path.expanduser('~\\AppData\\Local\\Microsoft\\Windows\\Caches'),
+            os.path.expanduser('~\\AppData\\Local\\Microsoft\\Windows\\WebCache'),
+            os.path.expanduser('~\\AppData\\Local\\Microsoft\\Windows\\INetCache'),
+            os.path.expanduser('~\\AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files'),
+        ]
+        
         # Progress callbacks
         self.on_progress_update: Optional[Callable] = None
         self.on_task_start: Optional[Callable] = None
@@ -415,12 +427,256 @@ class OptimusOptimizer:
             self.log_message(error_msg, "ERROR", geek_mode)
             return {'success': False, 'error': str(e)}
     
+    def clear_windows_update_cache(self, geek_mode: bool = False) -> Dict:
+        """Clear Windows Update cache and temporary files"""
+        try:
+            if self.on_task_start:
+                self.on_task_start("windows_update", "Windows Update Cache Cleanup")
+                
+            self.log_message("Starting Windows Update cache cleanup", "INFO", geek_mode)
+            
+            total_freed = 0
+            files_removed = 0
+            errors = []
+            
+            # Windows Update specific directories
+            update_dirs = [
+                os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\Download'),
+                os.path.expandvars('%SystemRoot%\\SoftwareDistribution\\DataStore'),
+                os.path.expandvars('%SystemRoot%\\Temp'),
+                os.path.expandvars('%SystemRoot%\\Logs\\CBS'),
+                os.path.expandvars('%SystemRoot%\\Logs\\DISM'),
+            ]
+            
+            for update_dir in update_dirs:
+                if self.check_cancelled():
+                    return {'success': False, 'error': 'Cancelled by user'}
+                    
+                if os.path.exists(update_dir):
+                    self.log_message(f"Cleaning Windows Update directory: {update_dir}", "DEBUG", geek_mode)
+                    try:
+                        freed, removed = self._clean_directory(update_dir, geek_mode)
+                        total_freed += freed
+                        files_removed += removed
+                        
+                        if removed > 0:
+                            self.log_message(f"Cleaned {update_dir}: {removed} files, {freed / (1024*1024):.2f} MB", 
+                                           "INFO", geek_mode)
+                        else:
+                            self.log_message(f"No files to clean in {update_dir}", "DEBUG", geek_mode)
+                            
+                    except Exception as e:
+                        error_msg = f"Error cleaning {update_dir}: {e}"
+                        errors.append(error_msg)
+                        self.log_message(error_msg, "ERROR", geek_mode)
+                else:
+                    self.log_message(f"Windows Update directory not found: {update_dir}", "DEBUG", geek_mode)
+            
+            # Try to stop and restart Windows Update service for deeper cleanup
+            if os.name == 'nt' and not self.check_cancelled():
+                self.log_message("Attempting to restart Windows Update service", "DEBUG", geek_mode)
+                try:
+                    subprocess.run(['net', 'stop', 'wuauserv'], check=True, capture_output=True, text=True)
+                    subprocess.run(['net', 'start', 'wuauserv'], check=True, capture_output=True, text=True)
+                    self.log_message("Windows Update service restarted successfully", "INFO", geek_mode)
+                except subprocess.CalledProcessError as e:
+                    self.log_message(f"Could not restart Windows Update service: {e}", "WARNING", geek_mode)
+                except Exception as e:
+                    self.log_message(f"Unexpected error restarting Windows Update service: {e}", "WARNING", geek_mode)
+            
+            freed_mb = total_freed / (1024 * 1024)
+            self.log_message(f"Windows Update cache cleanup completed: {files_removed} files removed, {freed_mb:.2f} MB freed", 
+                           "INFO", geek_mode)
+            
+            result = {
+                'success': len(errors) == 0,
+                'freed_space_mb': freed_mb,
+                'files_removed': files_removed,
+                'errors': errors
+            }
+            
+            if self.on_task_complete:
+                self.on_task_complete("windows_update", f"Cleaned {files_removed} files, freed {freed_mb:.2f} MB", freed_mb)
+                
+            return result
+            
+        except Exception as e:
+            error_msg = f"Windows Update cache cleanup failed: {e}"
+            self.log_message(error_msg, "ERROR", geek_mode)
+            return {'success': False, 'error': str(e)}
+    
+    def optimize_ssd(self, geek_mode: bool = False) -> Dict:
+        """Optimize SSD performance with TRIM and health monitoring"""
+        try:
+            if self.on_task_start:
+                self.on_task_start("ssd", "SSD Optimization")
+                
+            self.log_message("Starting SSD optimization", "INFO", geek_mode)
+            
+            results = {
+                'trim_executed': False,
+                'defrag_skipped': False,
+                'health_check': False,
+                'optimization_completed': False
+            }
+            
+            if os.name == 'nt':
+                # Execute TRIM command for all drives
+                self.log_message("Executing TRIM command for SSD optimization", "INFO", geek_mode)
+                try:
+                    result = subprocess.run(['defrag', '/C', '/H'], check=True, capture_output=True, text=True)
+                    self.log_message("TRIM command executed successfully", "INFO", geek_mode)
+                    results['trim_executed'] = True
+                    
+                    if geek_mode:
+                        self.log_message(f"TRIM output: {result.stdout}", "DEBUG", geek_mode)
+                        
+                except subprocess.CalledProcessError as e:
+                    self.log_message(f"TRIM command failed: {e}", "WARNING", geek_mode)
+                except Exception as e:
+                    self.log_message(f"Unexpected error during TRIM: {e}", "WARNING", geek_mode)
+                
+                # Check if defragmentation is needed (should be skipped for SSDs)
+                self.log_message("Checking disk fragmentation status", "DEBUG", geek_mode)
+                try:
+                    result = subprocess.run(['defrag', '/A', '/C'], check=True, capture_output=True, text=True)
+                    if 'SSD' in result.stdout or 'Solid State' in result.stdout:
+                        self.log_message("SSD detected - defragmentation skipped (not needed)", "INFO", geek_mode)
+                        results['defrag_skipped'] = True
+                    else:
+                        self.log_message("HDD detected - defragmentation may be beneficial", "INFO", geek_mode)
+                        
+                    if geek_mode:
+                        self.log_message(f"Disk analysis output: {result.stdout}", "DEBUG", geek_mode)
+                        
+                except subprocess.CalledProcessError as e:
+                    self.log_message(f"Disk analysis failed: {e}", "WARNING", geek_mode)
+                
+                # Check disk health using PowerShell
+                self.log_message("Performing disk health check", "DEBUG", geek_mode)
+                try:
+                    ps_command = "Get-PhysicalDisk | Select-Object DeviceID, MediaType, HealthStatus, OperationalStatus"
+                    result = subprocess.run(['powershell', '-Command', ps_command], 
+                                          check=True, capture_output=True, text=True)
+                    
+                    if 'Healthy' in result.stdout:
+                        self.log_message("Disk health check completed - drives are healthy", "INFO", geek_mode)
+                        results['health_check'] = True
+                    else:
+                        self.log_message("Disk health check completed - some drives may need attention", "WARNING", geek_mode)
+                        
+                    if geek_mode:
+                        self.log_message(f"Disk health output: {result.stdout}", "DEBUG", geek_mode)
+                        
+                except subprocess.CalledProcessError as e:
+                    self.log_message(f"Disk health check failed: {e}", "WARNING", geek_mode)
+            
+            results['optimization_completed'] = True
+            self.log_message("SSD optimization completed successfully", "INFO", geek_mode)
+            
+            if self.on_task_complete:
+                self.on_task_complete("ssd", "SSD optimization completed", 0)
+                
+            return {
+                'success': True,
+                'results': results
+            }
+            
+        except Exception as e:
+            error_msg = f"SSD optimization failed: {e}"
+            self.log_message(error_msg, "ERROR", geek_mode)
+            return {'success': False, 'error': str(e)}
+    
+    def clear_dns_cache(self, geek_mode: bool = False) -> Dict:
+        """Clear DNS cache and network optimization"""
+        try:
+            if self.on_task_start:
+                self.on_task_start("dns", "DNS Cache Cleanup")
+                
+            self.log_message("Starting DNS cache cleanup", "INFO", geek_mode)
+            
+            if os.name == 'nt':
+                try:
+                    # Clear DNS cache
+                    result = subprocess.run(['ipconfig', '/flushdns'], check=True, capture_output=True, text=True)
+                    self.log_message("DNS cache flushed successfully", "INFO", geek_mode)
+                    
+                    if geek_mode:
+                        self.log_message(f"DNS flush output: {result.stdout}", "DEBUG", geek_mode)
+                    
+                    # Reset network stack
+                    self.log_message("Resetting network stack", "DEBUG", geek_mode)
+                    subprocess.run(['netsh', 'winsock', 'reset'], check=True, capture_output=True, text=True)
+                    subprocess.run(['netsh', 'int', 'ip', 'reset'], check=True, capture_output=True, text=True)
+                    self.log_message("Network stack reset completed", "INFO", geek_mode)
+                    
+                except subprocess.CalledProcessError as e:
+                    self.log_message(f"Network optimization failed: {e}", "WARNING", geek_mode)
+                    return {'success': False, 'error': str(e)}
+                except Exception as e:
+                    self.log_message(f"Unexpected error during network optimization: {e}", "WARNING", geek_mode)
+                    return {'success': False, 'error': str(e)}
+            
+            self.log_message("DNS cache cleanup completed successfully", "INFO", geek_mode)
+            
+            if self.on_task_complete:
+                self.on_task_complete("dns", "DNS cache cleared and network optimized", 0)
+                
+            return {'success': True}
+            
+        except Exception as e:
+            error_msg = f"DNS cache cleanup failed: {e}"
+            self.log_message(error_msg, "ERROR", geek_mode)
+            return {'success': False, 'error': str(e)}
+    
+    def create_system_restore_point(self, geek_mode: bool = False) -> Dict:
+        """Create a system restore point before optimization"""
+        try:
+            if self.on_task_start:
+                self.on_task_start("restore_point", "Creating System Restore Point")
+                
+            self.log_message("Creating system restore point", "INFO", geek_mode)
+            
+            if os.name == 'nt':
+                try:
+                    # Create restore point using PowerShell
+                    ps_command = """
+                    Checkpoint-Computer -Description "OptimusPC Optimization" -RestorePointType "MODIFY_SETTINGS"
+                    """
+                    result = subprocess.run(['powershell', '-Command', ps_command], 
+                                          check=True, capture_output=True, text=True)
+                    
+                    self.log_message("System restore point created successfully", "INFO", geek_mode)
+                    
+                    if geek_mode:
+                        self.log_message(f"Restore point creation output: {result.stdout}", "DEBUG", geek_mode)
+                    
+                    if self.on_task_complete:
+                        self.on_task_complete("restore_point", "System restore point created", 0)
+                    
+                    return {'success': True, 'message': 'System restore point created successfully'}
+                    
+                except subprocess.CalledProcessError as e:
+                    self.log_message(f"Failed to create restore point: {e}", "WARNING", geek_mode)
+                    return {'success': False, 'error': str(e)}
+                except Exception as e:
+                    self.log_message(f"Unexpected error creating restore point: {e}", "WARNING", geek_mode)
+                    return {'success': False, 'error': str(e)}
+            else:
+                self.log_message("System restore points not supported on this platform", "INFO", geek_mode)
+                return {'success': True, 'message': 'System restore points not supported'}
+                
+        except Exception as e:
+            error_msg = f"System restore point creation failed: {e}"
+            self.log_message(error_msg, "ERROR", geek_mode)
+            return {'success': False, 'error': str(e)}
+    
     def run_full_optimization(self, geek_mode: bool = False, tasks: List[str] = None) -> Dict:
         """Run complete system optimization with detailed logging"""
         self.cancelled = False
         
         if tasks is None:
-            tasks = ['memory', 'temp', 'cache', 'startup']
+            tasks = ['restore_point', 'memory', 'temp', 'cache', 'windows_update', 'ssd', 'dns', 'startup']
             
         self.log_message("Starting full system optimization", "INFO", geek_mode)
         self.log_message(f"Optimization tasks: {', '.join(tasks)}", "INFO", geek_mode)
@@ -430,6 +686,12 @@ class OptimusOptimizer:
             'tasks_completed': [],
             'total_freed_mb': 0
         }
+        
+        # System restore point creation (first for safety)
+        if 'restore_point' in tasks and not self.check_cancelled():
+            results['restore_point'] = self.create_system_restore_point(geek_mode)
+            if results['restore_point']['success']:
+                results['tasks_completed'].append('restore_point')
         
         # Memory optimization
         if 'memory' in tasks and not self.check_cancelled():
@@ -451,6 +713,25 @@ class OptimusOptimizer:
             if results['browser_cache']['success']:
                 results['tasks_completed'].append('cache')
                 results['total_freed_mb'] += results['browser_cache'].get('total_freed_mb', 0)
+        
+        # Windows Update cache cleanup
+        if 'windows_update' in tasks and not self.check_cancelled():
+            results['windows_update_cleanup'] = self.clear_windows_update_cache(geek_mode)
+            if results['windows_update_cleanup']['success']:
+                results['tasks_completed'].append('windows_update')
+                results['total_freed_mb'] += results['windows_update_cleanup'].get('freed_space_mb', 0)
+        
+        # SSD optimization
+        if 'ssd' in tasks and not self.check_cancelled():
+            results['ssd_optimization'] = self.optimize_ssd(geek_mode)
+            if results['ssd_optimization']['success']:
+                results['tasks_completed'].append('ssd')
+        
+        # DNS cache cleanup
+        if 'dns' in tasks and not self.check_cancelled():
+            results['dns_cleanup'] = self.clear_dns_cache(geek_mode)
+            if results['dns_cleanup']['success']:
+                results['tasks_completed'].append('dns')
         
         # Startup analysis
         if 'startup' in tasks and not self.check_cancelled():

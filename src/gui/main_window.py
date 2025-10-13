@@ -117,24 +117,39 @@ class OptimusGUI:
     def create_optimization_widgets(self, parent):
         """Create optimization option widgets"""
         # Checkboxes for different optimization types
+        self.restore_point_var = tk.BooleanVar(value=True)
         self.memory_var = tk.BooleanVar(value=True)
         self.temp_var = tk.BooleanVar(value=True)
         self.cache_var = tk.BooleanVar(value=True)
+        self.windows_update_var = tk.BooleanVar(value=True)
+        self.ssd_var = tk.BooleanVar(value=True)
+        self.dns_var = tk.BooleanVar(value=True)
         self.startup_var = tk.BooleanVar(value=False)
         self.geek_mode_var = tk.BooleanVar(value=False)
         
+        # Basic optimizations
+        ttk.Checkbutton(parent, text="Create Restore Point", 
+                       variable=self.restore_point_var).grid(row=0, column=0, sticky=tk.W)
         ttk.Checkbutton(parent, text="Memory Optimization", 
-                       variable=self.memory_var).grid(row=0, column=0, sticky=tk.W)
+                       variable=self.memory_var).grid(row=0, column=1, sticky=tk.W)
         ttk.Checkbutton(parent, text="Clear Temporary Files", 
-                       variable=self.temp_var).grid(row=0, column=1, sticky=tk.W)
+                       variable=self.temp_var).grid(row=1, column=0, sticky=tk.W)
         ttk.Checkbutton(parent, text="Clear Browser Cache", 
-                       variable=self.cache_var).grid(row=1, column=0, sticky=tk.W)
+                       variable=self.cache_var).grid(row=1, column=1, sticky=tk.W)
+        
+        # Advanced optimizations
+        ttk.Checkbutton(parent, text="Windows Update Cleanup", 
+                       variable=self.windows_update_var).grid(row=2, column=0, sticky=tk.W)
+        ttk.Checkbutton(parent, text="SSD Optimization", 
+                       variable=self.ssd_var).grid(row=2, column=1, sticky=tk.W)
+        ttk.Checkbutton(parent, text="DNS Cache Cleanup", 
+                       variable=self.dns_var).grid(row=3, column=0, sticky=tk.W)
         ttk.Checkbutton(parent, text="Analyze Startup Programs", 
-                       variable=self.startup_var).grid(row=1, column=1, sticky=tk.W)
+                       variable=self.startup_var).grid(row=3, column=1, sticky=tk.W)
         
         # Geek mode toggle
         geek_frame = ttk.Frame(parent)
-        geek_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        geek_frame.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
         
         ttk.Checkbutton(geek_frame, text="Geek Mode (Detailed Logging)", 
                        variable=self.geek_mode_var).pack(side=tk.LEFT)
@@ -214,8 +229,9 @@ class OptimusGUI:
             return
             
         # Check if any optimization is selected
-        if not any([self.memory_var.get(), self.temp_var.get(), 
-                   self.cache_var.get(), self.startup_var.get()]):
+        if not any([self.restore_point_var.get(), self.memory_var.get(), self.temp_var.get(), 
+                   self.cache_var.get(), self.windows_update_var.get(), self.ssd_var.get(),
+                   self.dns_var.get(), self.startup_var.get()]):
             messagebox.showwarning("No Options Selected", 
                                  "Please select at least one optimization option.")
             return
@@ -228,6 +244,9 @@ class OptimusGUI:
         
         # Setup tasks based on selected options
         tasks = []
+        if self.restore_point_var.get():
+            tasks.append({'id': 'restore_point', 'name': 'Create System Restore Point', 
+                         'description': 'Creating restore point for safety before optimization'})
         if self.memory_var.get():
             tasks.append({'id': 'memory', 'name': 'Memory Optimization', 
                          'description': 'Optimizing RAM usage and clearing system cache'})
@@ -237,6 +256,15 @@ class OptimusGUI:
         if self.cache_var.get():
             tasks.append({'id': 'cache', 'name': 'Browser Cache Cleanup', 
                          'description': 'Clearing browser cache files'})
+        if self.windows_update_var.get():
+            tasks.append({'id': 'windows_update', 'name': 'Windows Update Cleanup', 
+                         'description': 'Clearing Windows Update cache and temporary files'})
+        if self.ssd_var.get():
+            tasks.append({'id': 'ssd', 'name': 'SSD Optimization', 
+                         'description': 'Optimizing SSD performance with TRIM and health checks'})
+        if self.dns_var.get():
+            tasks.append({'id': 'dns', 'name': 'DNS Cache Cleanup', 
+                         'description': 'Clearing DNS cache and optimizing network settings'})
         if self.startup_var.get():
             tasks.append({'id': 'startup', 'name': 'Startup Programs Analysis', 
                          'description': 'Analyzing startup programs and services'})
@@ -318,12 +346,20 @@ class OptimusGUI:
         try:
             # Determine which tasks to run
             tasks = []
+            if self.restore_point_var.get():
+                tasks.append('restore_point')
             if self.memory_var.get():
                 tasks.append('memory')
             if self.temp_var.get():
                 tasks.append('temp')
             if self.cache_var.get():
                 tasks.append('cache')
+            if self.windows_update_var.get():
+                tasks.append('windows_update')
+            if self.ssd_var.get():
+                tasks.append('ssd')
+            if self.dns_var.get():
+                tasks.append('dns')
             if self.startup_var.get():
                 tasks.append('startup')
             
@@ -395,6 +431,52 @@ class OptimusGUI:
                 output += f"  - Consider disabling unnecessary programs for faster boot\n\n"
             else:
                 output += f"❌ Startup Analysis: Failed - {startup_result.get('error', 'Unknown error')}\n\n"
+        
+        # Windows Update cleanup results
+        if 'windows_update_cleanup' in results:
+            update_result = results['windows_update_cleanup']
+            if update_result.get('success'):
+                freed_mb = update_result.get('freed_space_mb', 0)
+                output += f"✅ Windows Update Cleanup:\n"
+                output += f"  - Freed: {freed_mb:.2f} MB\n"
+                output += f"  - Files removed: {update_result.get('files_removed', 0)}\n\n"
+            else:
+                output += f"❌ Windows Update Cleanup: Failed\n\n"
+        
+        # SSD optimization results
+        if 'ssd_optimization' in results:
+            ssd_result = results['ssd_optimization']
+            if ssd_result.get('success'):
+                ssd_details = ssd_result.get('results', {})
+                output += f"✅ SSD Optimization:\n"
+                if ssd_details.get('trim_executed'):
+                    output += f"  - TRIM command executed\n"
+                if ssd_details.get('defrag_skipped'):
+                    output += f"  - Defragmentation skipped (SSD detected)\n"
+                if ssd_details.get('health_check'):
+                    output += f"  - Disk health check completed\n"
+                output += "\n"
+            else:
+                output += f"❌ SSD Optimization: Failed - {ssd_result.get('error', 'Unknown error')}\n\n"
+        
+        # DNS cache cleanup results
+        if 'dns_cleanup' in results:
+            dns_result = results['dns_cleanup']
+            if dns_result.get('success'):
+                output += f"✅ DNS Cache Cleanup:\n"
+                output += f"  - DNS cache flushed\n"
+                output += f"  - Network stack reset\n\n"
+            else:
+                output += f"❌ DNS Cache Cleanup: Failed - {dns_result.get('error', 'Unknown error')}\n\n"
+        
+        # System restore point results
+        if 'restore_point' in results:
+            restore_result = results['restore_point']
+            if restore_result.get('success'):
+                output += f"✅ System Restore Point:\n"
+                output += f"  - {restore_result.get('message', 'Created successfully')}\n\n"
+            else:
+                output += f"❌ System Restore Point: Failed - {restore_result.get('error', 'Unknown error')}\n\n"
         
         output += f"=== Summary ===\n"
         output += f"Total space freed: {total_freed:.2f} MB\n"
