@@ -50,11 +50,26 @@ class Config:
         """Load configuration from file"""
         if self.config_file.exists():
             try:
-                with open(self.config_file, 'r') as f:
-                    loaded_config = json.load(f)
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if not content:
+                        # File is empty, use defaults
+                        return
+                    loaded_config = json.loads(content)
                     self._merge_config(loaded_config)
-            except (json.JSONDecodeError, IOError) as e:
-                print(f"Error loading config: {e}. Using defaults.")
+            except json.JSONDecodeError as e:
+                print(f"Warning: Invalid JSON in config file: {e}. Using defaults.")
+                # Create a backup of the invalid config
+                backup_file = self.config_file.with_suffix('.json.backup')
+                try:
+                    with open(self.config_file, 'r', encoding='utf-8') as f:
+                        with open(backup_file, 'w', encoding='utf-8') as backup:
+                            backup.write(f.read())
+                    print(f"Invalid config backed up to: {backup_file}")
+                except:
+                    pass
+            except IOError as e:
+                print(f"Warning: Could not read config file: {e}. Using defaults.")
     
     def _merge_config(self, loaded_config: Dict[str, Any]):
         """Merge loaded config with defaults"""

@@ -1,0 +1,30 @@
+{
+    "general": {
+        "auto_cleanup": true,
+        "cleanup_interval_hours": 24,
+        "backup_before_cleanup": true,
+        "log_level": "INFO"
+    },
+    "memory": {
+        "auto_optimize": true,
+        "threshold_percent": 80,
+        "force_gc": true
+    },
+    "cleanup": {
+        "temp_files": true,
+        "browser_cache": true,
+        "recycle_bin": false,
+        "windows_update_cache": true,
+        "custom_paths": []
+    },
+    "gui": {
+        "theme": "default",
+        "window_size": [900, 700],
+        "remember_position": true
+    },
+    "advanced": {
+        "deep_scan": false,
+        "exclude_system_files": true,
+        "max_file_age_days": 30
+    }
+}
