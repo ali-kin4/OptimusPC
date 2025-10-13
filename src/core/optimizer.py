@@ -257,55 +257,102 @@ class OptimusOptimizer:
             
         return freed_space, files_removed
     
-    def clear_browser_cache(self) -> Dict:
-        """Clear browser cache files"""
-        browsers = {
-            'Chrome': [
-                os.path.expanduser('~\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache'),
-                os.path.expanduser('~\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Code Cache'),
-            ],
-            'Firefox': [
-                os.path.expanduser('~\\AppData\\Local\\Mozilla\\Firefox\\Profiles'),
-            ],
-            'Edge': [
-                os.path.expanduser('~\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Cache'),
-            ]
-        }
-        
-        total_freed = 0
-        files_removed = 0
-        results = {}
-        
-        for browser, paths in browsers.items():
-            browser_freed = 0
-            browser_files = 0
-            
-            for path in paths:
-                if os.path.exists(path):
-                    try:
-                        freed, removed = self._clean_directory(path)
-                        browser_freed += freed
-                        browser_files += removed
-                    except Exception as e:
-                        self.logger.error(f"Error cleaning {browser} cache: {e}")
-            
-            results[browser] = {
-                'freed_mb': browser_freed / (1024 * 1024),
-                'files_removed': browser_files
-            }
-            total_freed += browser_freed
-            files_removed += browser_files
-        
-        return {
-            'success': True,
-            'total_freed_mb': total_freed / (1024 * 1024),
-            'total_files_removed': files_removed,
-            'browsers': results
-        }
-    
-    def optimize_startup_programs(self) -> Dict:
-        """Analyze and suggest startup program optimizations"""
+    def clear_browser_cache(self, geek_mode: bool = False) -> Dict:
+        """Clear browser cache files with detailed logging"""
         try:
+            if self.on_task_start:
+                self.on_task_start("cache", "Browser Cache Cleanup")
+                
+            self.log_message("Starting browser cache cleanup", "INFO", geek_mode)
+            
+            browsers = {
+                'Chrome': [
+                    os.path.expanduser('~\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache'),
+                    os.path.expanduser('~\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Code Cache'),
+                ],
+                'Firefox': [
+                    os.path.expanduser('~\\AppData\\Local\\Mozilla\\Firefox\\Profiles'),
+                ],
+                'Edge': [
+                    os.path.expanduser('~\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Cache'),
+                ]
+            }
+            
+            total_freed = 0
+            files_removed = 0
+            results = {}
+            
+            for browser, paths in browsers.items():
+                if self.check_cancelled():
+                    return {'success': False, 'error': 'Cancelled by user'}
+                    
+                self.log_message(f"Cleaning {browser} cache", "INFO", geek_mode)
+                browser_freed = 0
+                browser_files = 0
+                
+                for path in paths:
+                    if self.check_cancelled():
+                        break
+                        
+                    if os.path.exists(path):
+                        self.log_message(f"Scanning {browser} cache: {path}", "DEBUG", geek_mode)
+                        try:
+                            freed, removed = self._clean_directory(path, geek_mode)
+                            browser_freed += freed
+                            browser_files += removed
+                            
+                            if removed > 0:
+                                self.log_message(f"{browser} cache cleaned: {removed} files, {freed / (1024*1024):.2f} MB", 
+                                               "INFO", geek_mode)
+                            else:
+                                self.log_message(f"No files to clean in {browser} cache", "DEBUG", geek_mode)
+                                
+                        except Exception as e:
+                            error_msg = f"Error cleaning {browser} cache: {e}"
+                            self.log_message(error_msg, "ERROR", geek_mode)
+                    else:
+                        self.log_message(f"{browser} cache directory not found: {path}", "DEBUG", geek_mode)
+                
+                results[browser] = {
+                    'freed_mb': browser_freed / (1024 * 1024),
+                    'files_removed': browser_files
+                }
+                total_freed += browser_freed
+                files_removed += browser_files
+                
+                if browser_files > 0:
+                    self.log_message(f"{browser} cleanup completed: {browser_files} files, {browser_freed / (1024*1024):.2f} MB", 
+                                   "INFO", geek_mode)
+            
+            total_freed_mb = total_freed / (1024 * 1024)
+            self.log_message(f"Browser cache cleanup completed: {files_removed} files removed, {total_freed_mb:.2f} MB freed", 
+                           "INFO", geek_mode)
+            
+            result = {
+                'success': True,
+                'total_freed_mb': total_freed_mb,
+                'total_files_removed': files_removed,
+                'browsers': results
+            }
+            
+            if self.on_task_complete:
+                self.on_task_complete("cache", f"Cleaned {files_removed} files, freed {total_freed_mb:.2f} MB", total_freed_mb)
+                
+            return result
+            
+        except Exception as e:
+            error_msg = f"Browser cache cleanup failed: {e}"
+            self.log_message(error_msg, "ERROR", geek_mode)
+            return {'success': False, 'error': str(e)}
+    
+    def optimize_startup_programs(self, geek_mode: bool = False) -> Dict:
+        """Analyze and suggest startup program optimizations with detailed logging"""
+        try:
+            if self.on_task_start:
+                self.on_task_start("startup", "Startup Programs Analysis")
+                
+            self.log_message("Starting startup programs analysis", "INFO", geek_mode)
+            
             # Get startup programs from registry
             startup_programs = []
             
@@ -321,6 +368,10 @@ class OptimusOptimizer:
                 ]
                 
                 for hkey, subkey in startup_keys:
+                    if self.check_cancelled():
+                        break
+                        
+                    self.log_message(f"Scanning registry key: {subkey}", "DEBUG", geek_mode)
                     try:
                         with winreg.OpenKey(hkey, subkey) as key:
                             i = 0
@@ -332,20 +383,36 @@ class OptimusOptimizer:
                                         'path': value,
                                         'location': f"{hkey}\\{subkey}"
                                     })
+                                    
+                                    if geek_mode:
+                                        self.log_message(f"Found startup program: {name} -> {value}", "DEBUG", geek_mode)
+                                    
                                     i += 1
                                 except OSError:
                                     break
                     except FileNotFoundError:
+                        self.log_message(f"Registry key not found: {subkey}", "DEBUG", geek_mode)
                         continue
+                    except Exception as e:
+                        self.log_message(f"Error reading registry key {subkey}: {e}", "WARNING", geek_mode)
             
-            return {
+            self.log_message(f"Startup programs analysis completed: {len(startup_programs)} programs found", 
+                           "INFO", geek_mode)
+            
+            result = {
                 'success': True,
                 'startup_programs': startup_programs,
                 'count': len(startup_programs)
             }
             
+            if self.on_task_complete:
+                self.on_task_complete("startup", f"Found {len(startup_programs)} startup programs", 0)
+                
+            return result
+            
         except Exception as e:
-            self.logger.error(f"Error analyzing startup programs: {e}")
+            error_msg = f"Startup programs analysis failed: {e}"
+            self.log_message(error_msg, "ERROR", geek_mode)
             return {'success': False, 'error': str(e)}
     
     def run_full_optimization(self, geek_mode: bool = False, tasks: List[str] = None) -> Dict:
