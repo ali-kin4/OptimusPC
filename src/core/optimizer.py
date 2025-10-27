@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Callable, Optional
 import time
 import gc
+from ..utils.system_detector import SystemDetector
+from ..utils.hardware_monitor import HardwareMonitor
 
 class OptimusOptimizer:
     """Main optimizer class for PC performance enhancement"""
@@ -17,6 +19,10 @@ class OptimusOptimizer:
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.system_detector = SystemDetector()
+        self.hardware_monitor = HardwareMonitor(self.system_detector)
+        self.windows_compatibility = self.system_detector.get_windows_compatibility_info()
+        
         self.temp_dirs = [
             tempfile.gettempdir(),
             os.path.expandvars('%TEMP%'),
@@ -76,10 +82,11 @@ class OptimusOptimizer:
     def get_system_info(self) -> Dict:
         """Get comprehensive system information"""
         try:
+            # Get basic system info using psutil
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             
-            return {
+            basic_info = {
                 'cpu_count': psutil.cpu_count(),
                 'cpu_percent': psutil.cpu_percent(interval=1),
                 'memory_total': memory.total,
@@ -90,6 +97,16 @@ class OptimusOptimizer:
                 'disk_percent': (disk.used / disk.total) * 100,
                 'boot_time': psutil.boot_time()
             }
+            
+            # Get detailed system info using system detector
+            detailed_info = self.system_detector.get_system_summary()
+            
+            # Merge basic and detailed info
+            if 'error' not in detailed_info:
+                basic_info.update(detailed_info)
+            
+            return basic_info
+            
         except Exception as e:
             self.logger.error(f"Error getting system info: {e}")
             return {}
@@ -122,8 +139,19 @@ class OptimusOptimizer:
             if os.name == 'nt':
                 self.log_message("Clearing system cache (Windows)", "DEBUG", geek_mode)
                 try:
-                    result = subprocess.run(['rundll32.exe', 'advapi32.dll,ProcessIdleTasks'], 
-                                         check=True, capture_output=True, text=True)
+                    # Use Windows version-specific commands
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell for better compatibility
+                        ps_command = "Clear-RecycleBin -Force -ErrorAction SilentlyContinue; [System.GC]::Collect()"
+                        result = subprocess.run(['powershell', '-Command', ps_command], 
+                                             check=True, capture_output=True, text=True)
+                        self.log_message("System cache cleared using PowerShell", "DEBUG", geek_mode)
+                    else:
+                        # Windows 7/8/8.1 - Use traditional methods
+                        result = subprocess.run(['rundll32.exe', 'advapi32.dll,ProcessIdleTasks'], 
+                                             check=True, capture_output=True, text=True)
+                        self.log_message("System cache cleared using rundll32", "DEBUG", geek_mode)
+                    
                     self.log_message("System cache cleared successfully", "DEBUG", geek_mode)
                 except subprocess.CalledProcessError as e:
                     self.log_message(f"System cache clear failed: {e}", "WARNING", geek_mode)
@@ -521,30 +549,57 @@ class OptimusOptimizer:
             }
             
             if os.name == 'nt':
-                # Execute TRIM command for all drives
+                # Execute TRIM command for all drives using Windows version-specific commands
                 self.log_message("Executing TRIM command for SSD optimization", "INFO", geek_mode)
                 try:
-                    result = subprocess.run(['defrag', '/C', '/H'], check=True, capture_output=True, text=True)
-                    self.log_message("TRIM command executed successfully", "INFO", geek_mode)
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell for better SSD optimization
+                        ps_command = """
+                        Get-PhysicalDisk | Where-Object {$_.MediaType -eq 'SSD'} | ForEach-Object {
+                            Write-Host "Optimizing SSD: $($_.FriendlyName)"
+                            Optimize-Volume -DriveLetter $_.DeviceID -ReTrim -Verbose
+                        }
+                        """
+                        result = subprocess.run(['powershell', '-Command', ps_command], 
+                                             check=True, capture_output=True, text=True)
+                        self.log_message("SSD optimization completed using PowerShell", "INFO", geek_mode)
+                    else:
+                        # Windows 7/8/8.1 - Use defrag with TRIM
+                        result = subprocess.run(['defrag', '/C', '/H'], check=True, capture_output=True, text=True)
+                        self.log_message("SSD optimization completed using defrag", "INFO", geek_mode)
+                    
                     results['trim_executed'] = True
                     
                     if geek_mode:
-                        self.log_message(f"TRIM output: {result.stdout}", "DEBUG", geek_mode)
+                        self.log_message(f"SSD optimization output: {result.stdout}", "DEBUG", geek_mode)
                         
                 except subprocess.CalledProcessError as e:
-                    self.log_message(f"TRIM command failed: {e}", "WARNING", geek_mode)
+                    self.log_message(f"SSD optimization failed: {e}", "WARNING", geek_mode)
                 except Exception as e:
-                    self.log_message(f"Unexpected error during TRIM: {e}", "WARNING", geek_mode)
+                    self.log_message(f"Unexpected error during SSD optimization: {e}", "WARNING", geek_mode)
                 
                 # Check if defragmentation is needed (should be skipped for SSDs)
                 self.log_message("Checking disk fragmentation status", "DEBUG", geek_mode)
                 try:
-                    result = subprocess.run(['defrag', '/A', '/C'], check=True, capture_output=True, text=True)
-                    if 'SSD' in result.stdout or 'Solid State' in result.stdout:
-                        self.log_message("SSD detected - defragmentation skipped (not needed)", "INFO", geek_mode)
-                        results['defrag_skipped'] = True
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell for disk analysis
+                        ps_command = "Get-PhysicalDisk | Select-Object FriendlyName, MediaType, HealthStatus"
+                        result = subprocess.run(['powershell', '-Command', ps_command], 
+                                             check=True, capture_output=True, text=True)
+                        
+                        if 'SSD' in result.stdout or 'Solid State' in result.stdout:
+                            self.log_message("SSD detected - defragmentation skipped (not needed)", "INFO", geek_mode)
+                            results['defrag_skipped'] = True
+                        else:
+                            self.log_message("HDD detected - defragmentation may be beneficial", "INFO", geek_mode)
                     else:
-                        self.log_message("HDD detected - defragmentation may be beneficial", "INFO", geek_mode)
+                        # Windows 7/8/8.1 - Use defrag for analysis
+                        result = subprocess.run(['defrag', '/A', '/C'], check=True, capture_output=True, text=True)
+                        if 'SSD' in result.stdout or 'Solid State' in result.stdout:
+                            self.log_message("SSD detected - defragmentation skipped (not needed)", "INFO", geek_mode)
+                            results['defrag_skipped'] = True
+                        else:
+                            self.log_message("HDD detected - defragmentation may be beneficial", "INFO", geek_mode)
                         
                     if geek_mode:
                         self.log_message(f"Disk analysis output: {result.stdout}", "DEBUG", geek_mode)
@@ -552,14 +607,20 @@ class OptimusOptimizer:
                 except subprocess.CalledProcessError as e:
                     self.log_message(f"Disk analysis failed: {e}", "WARNING", geek_mode)
                 
-                # Check disk health using PowerShell
+                # Check disk health using Windows version-specific commands
                 self.log_message("Performing disk health check", "DEBUG", geek_mode)
                 try:
-                    ps_command = "Get-PhysicalDisk | Select-Object DeviceID, MediaType, HealthStatus, OperationalStatus"
-                    result = subprocess.run(['powershell', '-Command', ps_command], 
-                                          check=True, capture_output=True, text=True)
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell for health check
+                        ps_command = "Get-PhysicalDisk | Select-Object DeviceID, MediaType, HealthStatus, OperationalStatus"
+                        result = subprocess.run(['powershell', '-Command', ps_command], 
+                                              check=True, capture_output=True, text=True)
+                    else:
+                        # Windows 7/8/8.1 - Use wmic for health check
+                        result = subprocess.run(['wmic', 'diskdrive', 'get', 'status,size,model'], 
+                                              check=True, capture_output=True, text=True)
                     
-                    if 'Healthy' in result.stdout:
+                    if 'Healthy' in result.stdout or 'OK' in result.stdout:
                         self.log_message("Disk health check completed - drives are healthy", "INFO", geek_mode)
                         results['health_check'] = True
                     else:
@@ -597,17 +658,40 @@ class OptimusOptimizer:
             
             if os.name == 'nt':
                 try:
-                    # Clear DNS cache
-                    result = subprocess.run(['ipconfig', '/flushdns'], check=True, capture_output=True, text=True)
-                    self.log_message("DNS cache flushed successfully", "INFO", geek_mode)
+                    # Clear DNS cache using Windows version-specific commands
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell for better network management
+                        ps_command = """
+                        Clear-DnsClientCache
+                        Write-Host "DNS cache cleared"
+                        """
+                        result = subprocess.run(['powershell', '-Command', ps_command], 
+                                             check=True, capture_output=True, text=True)
+                        self.log_message("DNS cache flushed using PowerShell", "INFO", geek_mode)
+                    else:
+                        # Windows 7/8/8.1 - Use traditional ipconfig
+                        result = subprocess.run(['ipconfig', '/flushdns'], check=True, capture_output=True, text=True)
+                        self.log_message("DNS cache flushed using ipconfig", "INFO", geek_mode)
                     
                     if geek_mode:
                         self.log_message(f"DNS flush output: {result.stdout}", "DEBUG", geek_mode)
                     
-                    # Reset network stack
+                    # Reset network stack using Windows version-specific commands
                     self.log_message("Resetting network stack", "DEBUG", geek_mode)
-                    subprocess.run(['netsh', 'winsock', 'reset'], check=True, capture_output=True, text=True)
-                    subprocess.run(['netsh', 'int', 'ip', 'reset'], check=True, capture_output=True, text=True)
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell for network reset
+                        ps_command = """
+                        netsh winsock reset
+                        netsh int ip reset
+                        Write-Host "Network stack reset completed"
+                        """
+                        subprocess.run(['powershell', '-Command', ps_command], 
+                                    check=True, capture_output=True, text=True)
+                    else:
+                        # Windows 7/8/8.1 - Use netsh directly
+                        subprocess.run(['netsh', 'winsock', 'reset'], check=True, capture_output=True, text=True)
+                        subprocess.run(['netsh', 'int', 'ip', 'reset'], check=True, capture_output=True, text=True)
+                    
                     self.log_message("Network stack reset completed", "INFO", geek_mode)
                     
                 except subprocess.CalledProcessError as e:
@@ -639,12 +723,29 @@ class OptimusOptimizer:
             
             if os.name == 'nt':
                 try:
-                    # Create restore point using PowerShell
-                    ps_command = """
-                    Checkpoint-Computer -Description "OptimusPC Optimization" -RestorePointType "MODIFY_SETTINGS"
-                    """
-                    result = subprocess.run(['powershell', '-Command', ps_command], 
-                                          check=True, capture_output=True, text=True)
+                    # Create restore point using Windows version-specific commands
+                    if self.windows_compatibility.get('version') in ['10', '11']:
+                        # Windows 10/11 - Use PowerShell Checkpoint-Computer
+                        ps_command = """
+                        Checkpoint-Computer -Description "OptimusPC Optimization" -RestorePointType "MODIFY_SETTINGS"
+                        """
+                        result = subprocess.run(['powershell', '-Command', ps_command], 
+                                              check=True, capture_output=True, text=True)
+                        self.log_message("System restore point created using PowerShell", "INFO", geek_mode)
+                    else:
+                        # Windows 7/8/8.1 - Use wmic or vssadmin
+                        try:
+                            # Try wmic first
+                            result = subprocess.run(['wmic', 'path', 'Win32_SystemRestore', 'call', 'CreateRestorePoint', 
+                                                   '"OptimusPC Optimization"', '7', '0'], 
+                                                  check=True, capture_output=True, text=True)
+                            self.log_message("System restore point created using wmic", "INFO", geek_mode)
+                        except subprocess.CalledProcessError:
+                            # Fallback to vssadmin
+                            result = subprocess.run(['vssadmin', 'create', 'shadow', '/for=C:', 
+                                                   '/autoretry=1'], 
+                                                  check=True, capture_output=True, text=True)
+                            self.log_message("System restore point created using vssadmin", "INFO", geek_mode)
                     
                     self.log_message("System restore point created successfully", "INFO", geek_mode)
                     
@@ -751,3 +852,45 @@ class OptimusOptimizer:
             self.log_message(f"Tasks completed: {len(results['tasks_completed'])}/{len(tasks)}", "INFO", geek_mode)
         
         return results
+    
+    def start_hardware_monitoring(self, update_interval: float = 1.0):
+        """Start real-time hardware monitoring"""
+        try:
+            self.hardware_monitor.start_monitoring(update_interval)
+            self.log_message(f"Hardware monitoring started with {update_interval}s interval", "INFO")
+            return {'success': True}
+        except Exception as e:
+            self.log_message(f"Failed to start hardware monitoring: {e}", "ERROR")
+            return {'success': False, 'error': str(e)}
+    
+    def stop_hardware_monitoring(self):
+        """Stop real-time hardware monitoring"""
+        try:
+            self.hardware_monitor.stop_monitoring()
+            self.log_message("Hardware monitoring stopped", "INFO")
+            return {'success': True}
+        except Exception as e:
+            self.log_message(f"Failed to stop hardware monitoring: {e}", "ERROR")
+            return {'success': False, 'error': str(e)}
+    
+    def get_performance_score(self) -> Dict:
+        """Get current system performance score"""
+        try:
+            score = self.hardware_monitor.get_system_performance_score()
+            return {'success': True, 'score': score}
+        except Exception as e:
+            self.log_message(f"Failed to get performance score: {e}", "ERROR")
+            return {'success': False, 'error': str(e)}
+    
+    def add_monitoring_callback(self, event_type: str, callback: Callable):
+        """Add a callback for hardware monitoring events"""
+        try:
+            self.hardware_monitor.add_callback(event_type, callback)
+            return {'success': True}
+        except Exception as e:
+            self.log_message(f"Failed to add monitoring callback: {e}", "ERROR")
+            return {'success': False, 'error': str(e)}
+    
+    def is_monitoring_active(self) -> bool:
+        """Check if hardware monitoring is active"""
+        return self.hardware_monitor.is_monitoring()
