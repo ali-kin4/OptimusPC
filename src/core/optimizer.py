@@ -1,6 +1,5 @@
 # OptimusPC Core Optimizer Module
 
-import psutil
 import os
 import tempfile
 import shutil
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Callable, Optional
 import time
 import gc
+from ..utils.psutil_safe import psutil
 from ..utils.system_detector import SystemDetector
 from ..utils.hardware_monitor import HardwareMonitor
 
@@ -85,7 +85,7 @@ class OptimusOptimizer:
             # Get basic system info using psutil
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
-            
+
             basic_info = {
                 'cpu_count': psutil.cpu_count(),
                 'cpu_percent': psutil.cpu_percent(interval=1),
@@ -94,7 +94,7 @@ class OptimusOptimizer:
                 'memory_percent': memory.percent,
                 'disk_total': disk.total,
                 'disk_free': disk.free,
-                'disk_percent': (disk.used / disk.total) * 100,
+                'disk_percent': (disk.used / disk.total) * 100 if getattr(disk, 'total', 0) else 0,
                 'boot_time': psutil.boot_time()
             }
             

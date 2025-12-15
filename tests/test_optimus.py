@@ -29,7 +29,7 @@ class TestOptimusOptimizer(unittest.TestCase):
         self.assertIn('memory_total', info)
         self.assertIn('disk_total', info)
     
-    @patch('psutil.virtual_memory')
+    @patch('src.utils.psutil_safe.psutil.virtual_memory')
     def test_optimize_memory(self, mock_memory):
         """Test memory optimization"""
         # Mock memory info

@@ -1,10 +1,10 @@
 # OptimusPC Hardware Monitoring Module
 
-import psutil
 import time
 import threading
 import logging
 from typing import Dict, List, Callable, Optional
+from .psutil_safe import psutil
 from .system_detector import SystemDetector
 
 # Try to import GPUtil, but make it optional
