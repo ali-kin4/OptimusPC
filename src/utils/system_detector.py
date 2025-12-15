@@ -1,15 +1,25 @@
 # OptimusPC System Detection Module
 
 import platform
-import psutil
 import subprocess
 import json
 import re
 import os
 import logging
+from importlib.util import find_spec
 from typing import Dict, List, Optional, Tuple
-import wmi
 from pathlib import Path
+
+if platform.system() == "Windows" and find_spec("wmi"):
+    import wmi  # type: ignore[import-not-found]
+else:
+    class _WMIStub:  # pragma: no cover - used in non-Windows or missing dependency
+        def __getattr__(self, name):
+            raise RuntimeError("WMI is not available on this platform")
+
+    wmi = _WMIStub()
+
+from .psutil_safe import psutil
 
 # Try to import GPUtil, but make it optional
 try:
